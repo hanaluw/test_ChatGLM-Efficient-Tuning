@@ -77,7 +77,7 @@ def load_data(jsonl_path: Path, checkpoint_path: Path, n: Optional[int] = None) 
         for line in jsonl_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    data = [item for item in data if item.get("id") not in done_ids]
+    data = [item for item in data if str(item.get("id")) not in done_ids]
 
     if n is not None:
         data = random.Random(RANDOM_SEED).sample(data, min(n, len(data)))
