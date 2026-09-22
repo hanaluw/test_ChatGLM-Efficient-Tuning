@@ -8,7 +8,10 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from dotenv import load_dotenv
 from openai import OpenAI
+
+load_dotenv()
 
 # =================================
 # Cau hinh
@@ -24,9 +27,10 @@ RANDOM_SEED = 42
 BATCH_SIZE = 10
 MAX_RETRIES = 3
 
-MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
-BASE_URL = os.environ.get("OPENAI_BASE_URL")
-API_KEY = os.environ.get("OPENAI_API_KEY")
+# Groq (OpenAI-compatible API)
+MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+API_KEY = os.environ.get("GROQ_API_KEY")
 
 REQUIRED_FIELDS = {"sentence_id", "has_event", "events"}
 
