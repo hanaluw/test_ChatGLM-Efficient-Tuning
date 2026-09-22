@@ -1,5 +1,5 @@
 # Event Extraction using LLMs (GPT-4o, Qwen 2.5, Llama 3)
-# Doc jsonl cau, goi LLM theo tung batch de gan nhan FinTech theme + event, luu ra JSONL.
+# Doc jsonl cau, goi LLM theo tung batch de gan nhan event, luu ra JSONL (chi giu sentence_id + event, khong luu lai sentence).
 
 import json
 import os
@@ -28,30 +28,12 @@ MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 BASE_URL = os.environ.get("OPENAI_BASE_URL")
 API_KEY = os.environ.get("OPENAI_API_KEY")
 
-REQUIRED_FIELDS = {"sentence_id", "sentence", "is_fintech", "fintech_themes", "events"}
+REQUIRED_FIELDS = {"sentence_id", "has_event", "events"}
 
 SYSTEM_INSTRUCTION = """
-Ban la chuyen gia NLP phu trach gan nhan su kien va chu de Tai chinh Cong nghe (FinTech) trong tin tuc tieng Viet.
+Ban la chuyen gia NLP phu trach gan nhan su kien Tai chinh Cong nghe (FinTech) trong tin tuc tieng Viet.
 
-Nhiem vu:
-1. Xac dinh cau co lien quan den FinTech hay khong.
-2. Xac dinh mot hoac nhieu linh vuc FinTech duoc de cap.
-3. Xac dinh mot hoac nhieu su kien duoc the hien trong cau.
-4. Xac dinh trigger cua tung su kien.
-5. Gan moi su kien vao linh vuc FinTech tuong ung.
-
-1. FINTECH THEMES
-- "Banking": Ngan hang, tai khoan, tien gui, tiet kiem, the, ngan hang so, challenger/neobank va ha tang ngan hang.
-- "Crowdfunding": Goi von cong dong qua nen tang truc tuyen.
-- "Digital Assets": Crypto, token, stablecoin, NFT, RWA va cac dich vu tai chinh lay blockchain/DLT lam trong tam.
-- "Insurance": Bao hiem so, phan phoi bao hiem, tham dinh, boi thuong va cac nen tang InsurTech.
-- "Investment": Dau tu va giao dich truc tiep, moi gioi chung khoan, nen tang giao dich, VC va PE.
-- "Lending": Khoan vay va tin dung, P2P/marketplace lending, BNPL, embedded credit va cac giai phap ho tro tin dung.
-- "Payments": Thanh toan va chuyen tien, vi dien tu, payment gateway, QR/NFC, POS, remittance va thanh toan xuyen bien gioi.
-- "Wealth Management": Quan ly tai san, tai chinh ca nhan, hoach dinh tai chinh, robo-advisory va toi uu danh muc.
-- "Other": Cac linh vuc FinTech khac khong thuoc cac nhom tren, nhu RegTech va SupTech.
-
-2. EVENT TYPES
+1. EVENT TYPES
 - "Funding": Huy dong, nhan hoac rot von; dau tu, IPO, trai phieu va tai tro.
 - "Partnership": Hop tac, lien minh, lien doanh, MOU, phan phoi, tich hop API hoac ket noi nen tang.
 - "Merger/Acquisition": Sap nhap, mua lai, ban tai san, thoai von hoac thay doi quyen so huu/kiem soat.
@@ -61,19 +43,25 @@ Nhiem vu:
 - "Recognizing & Branding": Marketing, quang cao, giai thuong, chung nhan, tai tro, ESG/CSR.
 - "Disrupting": Su co he thong, gian doan dich vu, tan cong mang, ro ri du lieu, gian lan, vo no hoac no xau tang manh.
 
-3. QUY TAC
-- "is_fintech" = true neu cau thuoc it nhat 1 FinTech Theme, nguoc lai = false.
-- Neu is_fintech = false -> fintech_themes: [] va events: [].
-- Co the gan nhieu themes/events cho 1 cau. Chi gan event khi cau thuc su the hien su kien.
-- "evidence" va "trigger" phai la doan van ban trich nguyen van tu cau, khong dich/sua/viet lai.
-- Chi dung cac nhan duoc liet ke o tren.
+2. QUY TAC
 
-4. OUTPUT
-Tra ve DUY NHAT 1 JSON array, moi phan tu ung voi dung 1 cau dau vao, theo dung thu tu:
-{"sentence_id": "", "sentence": "", "is_fintech": true/false,
- "fintech_themes": [{"theme": "", "evidence": ""}],
- "events": [{"event_type": "", "trigger": "", "theme": ""}]}
-Khong them giai thich hay van ban ngoai JSON.
+2.1. Xac dinh cau co chua su kien (has_event):
+- Tra ve true neu cau co de cap/mo ta it nhat mot su kien thuc te dien ra (bao gom ca su kien da/dang xay ra hoac du kien chac chan xay ra).
+- Tra ve false neu cau chi mang tinh dinh nghia, nhan dinh chung chung, ly thuyet hoac khong co su kien. Khi do, mang "events" BAT BUOC la mang rong [].
+
+2.2. Trich xuat "trigger":
+- "trigger": Tu hoac cum tu ngan nhat kich hoat su kien xuat hien NGUYEN VAN trong cau (thuong la dong tu hoac danh tu hoa nhu "bat tay", "goi von", "ra mat", "xu phat", "sa thai").
+- TUYET DOI KHONG tu y sua loi chinh ta, dich thuat hay dien giai lai trigger.
+
+2.3. Da su kien (Multi-event):
+- Mot cau co the chua nhieu su kien. Trich xuat day du tat ca cac su kien xuat hien trong cau.
+- "event_type" chi duoc dung cac nhan trong EVENT TYPES o tren.
+
+3. OUTPUT
+Tra ve DUY NHAT 1 JSON array, moi phan tu ung voi dung 1 cau dau vao, theo dung thu tu, dung schema:
+{"sentence_id": "<STRING>", "has_event": true/false,
+ "events": [{"event_type": "<EVENT_TYPE_LABEL>", "trigger": "<TRIGGER_SPAN_NGUYEN_VAN>"}]}
+Khong tra ve truong "sentence". Khong them giai thich hay van ban ngoai JSON.
 """
 
 
@@ -103,8 +91,8 @@ def make_batches(data: List[Dict], batch_size: int = BATCH_SIZE):
 
 
 def build_prompt(batch: List[Dict]) -> str:
-    """Ghep cac cau trong batch thanh prompt, moi cau kem sentence_id."""
-    sentences = [{"sentence_id": item["id"], "sentence": item["snippet"]} for item in batch]
+    """Ghep cac cau trong batch thanh prompt. Dung item["id"] (unique toan file) lam sentence_id gui cho LLM."""
+    sentences = [{"sentence_id": item["id"], "sentence": item["sentence"]} for item in batch]
     return json.dumps(sentences, ensure_ascii=False)
 
 
