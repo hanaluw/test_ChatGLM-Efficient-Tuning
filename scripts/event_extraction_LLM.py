@@ -97,7 +97,8 @@ def build_prompt(batch: List[Dict]) -> str:
 
 
 def call_llm(client: OpenAI, prompt: str) -> List[Dict]:
-    """Goi LLM, yeu cau tra ve JSON array. Retry don gian neu loi."""
+    """Goi LLM, yeu cau tra ve JSON array. Retry co backoff, giu lai chan doan loi cuoi cung de bao ro nguyen nhan."""
+    last_diag = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             completion = client.chat.completions.create(
@@ -108,12 +109,27 @@ def call_llm(client: OpenAI, prompt: str) -> List[Dict]:
                     {"role": "user", "content": prompt},
                 ],
             )
-            return json.loads(completion.choices[0].message.content)
+            choice = completion.choices[0]
+            text = choice.message.content
+            finish_reason = getattr(choice, "finish_reason", None)
+
+            if not text:
+                # Model tra ve rong (vd bi cat do het token) -> khong parse duoc, thu lai.
+                last_diag = f"empty content (finish_reason={finish_reason})"
+            else:
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError as e:
+                    last_diag = f"invalid JSON (finish_reason={finish_reason}): {e}"
         except Exception as e:
-            print(f"  [retry {attempt}/{MAX_RETRIES}] call_llm error: {e}")
-            if attempt == MAX_RETRIES:
-                raise
+            # Loi API: timeout, rate limit, network...
+            last_diag = f"API error: {e}"
+
+        print(f"  [retry {attempt}/{MAX_RETRIES}] call_llm failed: {last_diag}")
+        if attempt < MAX_RETRIES:
             time.sleep(2 * attempt)
+
+    raise RuntimeError(f"call_llm failed after {MAX_RETRIES} attempts ({last_diag})")
 
 
 def validate_result(result: List[Dict], batch: List[Dict]) -> List[Dict]:
